@@ -112,6 +112,15 @@ extern const struct dai_ops ssp_ops;
 #define SSCR1_TTE	(1 << 30)
 #define SSCR1_TTELP	(1 << 31)
 
+/* SSCR2 bits */
+#define SSCR2_URUN_FIX0	(1 << 0)
+#define SSCR2_URUN_FIX1	(1 << 1)
+#define SSCR2_SLV_EXT_CLK_RUN_EN	(1 << 2)
+#define SSCR2_CLK_DEL_EN		(1 << 3)
+#define SSCR2_UNDRN_FIX_EN		(1 << 6)
+#define SSCR2_FIFO_EMPTY_FIX_EN		(1 << 7)
+/* ASRC bits are not used for now */
+
 /* SSR bits */
 #define SSSR_TNF	(1 << 2)
 #define SSSR_RNE	(1 << 3)
@@ -122,7 +131,7 @@ extern const struct dai_ops ssp_ops;
 
 /* SSPSP bits */
 #define SSPSP_SCMODE(x)		((x) << 0)
-#define SSPSP_SFRMP		(1 << 2)
+#define SSPSP_SFRMP(x)		((x) << 2)
 #define SSPSP_ETDS		(1 << 3)
 #define SSPSP_STRTDLY(x)	((x) << 4)
 #define SSPSP_DMYSTRT(x)	((x) << 7)
@@ -132,18 +141,26 @@ extern const struct dai_ops ssp_ops;
 #define SSPSP_FSRT		(1 << 25)
 
 /* SSCR3 bits */
-#define SSCR3_I2S_FRM_MST	(1 << 0)
-#define SSCR3_I2S_ENA		(1 << 1)
-#define SSCR3_I2S_FRM_POL	(1 << 2)
-#define SSCR3_I2S_TX_ENA	(1 << 9)
-#define SSCR3_I2S_RX_ENA	(1 << 10)
-#define SSCR3_I2S_CLK_MST	(1 << 16)
+#define SSCR3_FRM_MST_EN	(1 << 0)
+#define SSCR3_I2S_MODE_EN	(1 << 1)
+#define SSCR3_I2S_FRM_POL(x)	((x) << 2)
+#define SSCR3_I2S_TX_SS_FIX_EN	(1 << 3)
+#define SSCR3_I2S_RX_SS_FIX_EN	(1 << 4)
+#define SSCR3_I2S_TX_EN		(1 << 9)
+#define SSCR3_I2S_RX_EN		(1 << 10)
+#define SSCR3_CLK_EDGE_SEL	(1 << 12)
+#define SSCR3_STRETCH_TX	(1 << 14)
+#define SSCR3_STRETCH_RX	(1 << 15)
+#define SSCR3_MST_CLK_EN	(1 << 16)
+#define SSCR3_SYN_FIX_EN	(1 << 17)
+
 
 /* SSCR4 bits */
-#define SSCR4_FRM_CLOCKS(x)	((x) << 7)
+#define SSCR4_TOT_FRM_PRD(x)	((x) << 7)
 
 /* SSCR5 bits */
 #define SSCR5_FRM_ASRT_CLOCKS(x)	(((x) - 1) << 1)
+#define SSCR5_FRM_POLARITY(x)	((x) << 0)
 
 /* SFIFOTT bits */
 #define SFIFOTT_TX(x)		((x) - 1)
