@@ -123,20 +123,41 @@ static inline int ssp_set_config(struct dai *dai,
 
 	/* FIXME: why did we enable PINTE and RWOT ?
 	   sscr1 = SSCR1_PINTE | SSCR1_RWOT; */
-
+#define OLD1
+//#define OLD2
+#define OLD3
+//#define OLD4
+//#define OLD5
+//#define OLD6
+//#define OLD7
+//#define OLD8
+//#define OLD9
+	
 	/* sscr1 dynamic settings are TFT, RFT, SFRMDIR, SCLKDIR, SCFR */
 	sscr1 = SSCR1_TTE;
-
+#ifndef OLD1
+	sscr1 |= SSCR1_TIE | SSCR1_RIE; /* SST sets TIE/RIE but bit RSRE/TSRE */
+#endif
+	
 	/* sscr2 dynamic setting is SLV_EXT_CLK_RUN_EN */
-	sscr2 = SSCR2_URUN_FIX0 | SSCR2_UNDRN_FIX_EN | SSCR2_FIFO_EMPTY_FIX_EN;
-
+	sscr2 = SSCR2_URUN_FIX0;
+#ifdef OLD9
+	sscr2 |= SSCR2_UNDRN_FIX_EN | SSCR2_FIFO_EMPTY_FIX_EN;
+#else
+	sscr2 |= SSCR2_ASRC_INTR_MASK;
+#endif
+	
+	
 	/*
 	 * sscr3 dynamic settings are FRM_MS_EN, I2S_MODE_EN, I2S_FRM_POL,
 	 * I2S_TX_EN, I2S_RX_EN, I2S_CLK_MST
 	 */
 	sscr3 = SSCR3_I2S_TX_SS_FIX_EN | SSCR3_I2S_RX_SS_FIX_EN |
-		SSCR3_CLK_EDGE_SEL | SSCR3_STRETCH_TX | SSCR3_STRETCH_RX |
+		SSCR3_STRETCH_TX | SSCR3_STRETCH_RX |
 		SSCR3_SYN_FIX_EN;
+#ifdef OLD2
+	sscr3 |= SSCR3_CLK_EDGE_SEL;
+#endif
 
 	/* sscr4 dynamic settings is TOT_FRAME_PRD */
 	sscr4 = 0x0;
@@ -145,13 +166,18 @@ static inline int ssp_set_config(struct dai *dai,
 	sscr5 = 0x0;
 
 	/* sspsp dynamic settings are SCMODE, SFRMP, DMYSTRT, SFRMWDTH */
-	sspsp = 0x0;
-
+#ifdef OLD3
+	sspsp = 0;
+#else
+	sspsp = SSPSP_ETDS;
+#endif
 	ssp->config = *config;
 	ssp->params = config->ssp[0];
 
+#ifdef CLK_TYPE
 	/* TODO: allow topology to define SSP clock type */
 	config->ssp[0].clk_id = SSP_CLK_EXT;
+#endif
 
 	/* clock masters */
 	switch (config->format & SOF_DAI_FMT_MASTER_MASK) {
@@ -161,7 +187,9 @@ static inline int ssp_set_config(struct dai *dai,
 		sscr2 |= SSCR2_SLV_EXT_CLK_RUN_EN;
 		break;
 	case SOF_DAI_FMT_CBS_CFS:
+#ifdef OLD4
 		sscr1 |= SSCR1_SCFR;
+#endif
 		sscr3 |= SSCR3_FRM_MST_EN;
 		cfs = true;
 		cbs = true;
@@ -174,7 +202,9 @@ static inline int ssp_set_config(struct dai *dai,
 		cfs = true;
 		break;
 	case SOF_DAI_FMT_CBS_CFM:
+#ifdef OLD5
 		sscr1 |= SSCR1_SCFR;
+#endif
 		sscr1 |= SSCR1_SFRMDIR;
 		cbs = true;
 		break;
@@ -206,6 +236,7 @@ static inline int ssp_set_config(struct dai *dai,
 		goto out;
 	}
 
+#ifdef CLK_TYPE
 	/* clock source */
 	switch (config->ssp[0].clk_id) {
 	case SSP_CLK_AUDIO:
@@ -225,7 +256,8 @@ static inline int ssp_set_config(struct dai *dai,
 		ret = -EINVAL;
 		goto out;
 	}
-
+#endif
+	
 	/* BCLK is generated from MCLK - must be divisable */
 	if (config->mclk % config->bclk) {
 		trace_ssp_error("ec5");
@@ -269,7 +301,7 @@ static inline int ssp_set_config(struct dai *dai,
 	/* format */
 	switch (config->format & SOF_DAI_FMT_FORMAT_MASK) {
 	case SOF_DAI_FMT_I2S:
-
+		sscr1 |= SSCR1_SFRMDIR;
 		start_delay = 1;
 
 		/* enable I2S mode */
@@ -279,8 +311,13 @@ static inline int ssp_set_config(struct dai *dai,
 		frame_len = config->sample_container_bits;
 
 		/* handle frame polarity, I2S default is falling/active low */
+#ifdef OLD6
 		sspsp |= SSPSP_SFRMP(inverted_frame);
-		sscr3 |= SSCR3_I2S_FRM_POL(inverted_frame);
+#else
+		sspsp |= SSPSP_SFRMP(!inverted_frame);  /* FIXME, this looks wrong */
+#endif
+		
+		sscr3 |= SSCR3_I2S_FRM_POL(!inverted_frame);
 
 		if (cbs) {
 			/* keep RX functioning on a TX underflow (I2S/LEFT_J master only) */
@@ -293,18 +330,17 @@ static inline int ssp_set_config(struct dai *dai,
 		break;
 
 	case SOF_DAI_FMT_LEFT_J:
-
+		sscr1 |= SSCR1_SFRMDIR;
 		start_delay = 0;
 
-		/* FIXME: how we we enable LEFT_J mode?
-		 * 		sscr3 |= SSCR3_I2S_ENA | SSCR3_I2S_TX_ENA | SSCR3_I2S_RX_ENA;
-		 */
-
+		/* apparently we need the same initialization as for I2S */
+		sscr3 |= SSCR3_I2S_MODE_EN | SSCR3_I2S_TX_EN | SSCR3_I2S_RX_EN;
+		 
 		/* set asserted frame length */
 		frame_len = config->sample_container_bits;
 
 		/* handle frame polarity, LEFT_J default is rising/active high */
-		sspsp |= SSPSP_SFRMP(!inverted_frame);
+		sspsp |= SSPSP_SFRMP(!inverted_frame); /* FIXME, this looks wrong */
 		sscr3 |= SSCR3_I2S_FRM_POL(!inverted_frame);
 
 		if (cbs) {
@@ -385,9 +421,27 @@ static inline int ssp_set_config(struct dai *dai,
 	 * watermarks - (RFT + 1) should equal DMA SRC_MSIZE
 	 * sfifott = (SFIFOTT_TX(4) | SFIFOTT_RX(12));
 	 */
+#ifdef OLD8
 	sfifott = (SFIFOTT_TX(2*active_tx_slots) | SFIFOTT_RX(16-2*active_rx_slots));
+#else
+	sfifott = (SFIFOTT_TX(2*active_tx_slots) | SFIFOTT_RX(2*active_rx_slots));
+#endif
 
 	trace_ssp("coe");
+
+#if 0
+	/* values from SST driver */
+	sscr0 = 0x00D007B7 & ~SSCR0_SSE;
+	sscr1 = 0x41300CC3 & ~SSCR1_TSRE & ~SSCR1_RSRE & ~SSCR1_TIE & ~SSCR1_RIE;
+	sscr2 = 0x00000801;
+	sscr3 = 0x0003C61F;
+	sscr4 = 0x00001900;
+	sscr5 = 0x00000030;
+	sfifott = 0x00030003;
+	config->tx_slot_mask = 3;
+	config->rx_slot_mask = 3;
+#endif
+	
 	ssp_write(dai, SSCR0, sscr0);
 	ssp_write(dai, SSCR1, sscr1);
 	ssp_write(dai, SSCR2, sscr2);

@@ -91,9 +91,9 @@ extern const struct dai_ops ssp_ops;
 #define SSCR1_SPH	(1 << 4)
 #define SSCR1_MWDS	(1 << 5)
 #define SSCR1_TFT_MASK	(0x000003c0)
-#define SSCR1_TX(x) (((x) - 1) << 6)
+#define SSCR1_TFT(x) (((x) - 1) << 6)
 #define SSCR1_RFT_MASK	(0x00003c00)
-#define SSCR1_RX(x) (((x) - 1) << 10)
+#define SSCR1_RFT(x) (((x) - 1) << 10)
 #define SSCR1_EFWR	(1 << 14)
 #define SSCR1_STRF	(1 << 15)
 #define SSCR1_IFS	(1 << 16)
@@ -119,7 +119,10 @@ extern const struct dai_ops ssp_ops;
 #define SSCR2_CLK_DEL_EN		(1 << 3)
 #define SSCR2_UNDRN_FIX_EN		(1 << 6)
 #define SSCR2_FIFO_EMPTY_FIX_EN		(1 << 7)
-/* ASRC bits are not used for now */
+#define SSCR2_ASRC_CNTR_EN		(1 << 8)
+#define SSCR2_ASRC_CNTR_CLR		(1 << 9)
+#define SSCR2_ASRC_FRM_CNRT_EN		(1 << 10)
+#define SSCR2_ASRC_INTR_MASK		(1 << 11)
 
 /* SSR bits */
 #define SSSR_TNF	(1 << 2)
