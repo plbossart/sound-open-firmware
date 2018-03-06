@@ -81,7 +81,6 @@ static const int32_t tone_pi2_div_fs[TONE_NUM_FS] = {
 /* tone component private data */
 
 struct tone_state {
-	int mute;
 	int32_t a; /* Current amplitude Q1.31 */
 	int32_t a_target; /* Target amplitude Q1.31 */
 	int32_t ampl_coef; /* Amplitude multiplier Q2.30 */
@@ -102,6 +101,7 @@ struct tone_state {
 };
 
 struct comp_data {
+	int trigger;
 	uint32_t period_bytes;
 	uint32_t channels;
 	uint32_t frame_bytes;
@@ -170,10 +170,7 @@ static int32_t tonegen(struct tone_state *sg)
 	sg->w = (w > PI_MUL2_Q4_28)
 		? (int32_t) (w - PI_MUL2_Q4_28) : (int32_t) w;
 
-	if (sg->mute)
-		return 0;
-	else
-		return(int32_t) sine; /* Q1.31 no saturation need */
+	return (int32_t)sine;
 }
 
 static void tonegen_control(struct tone_state *sg)
@@ -300,14 +297,27 @@ static inline int32_t tonegen_get_a(struct tone_state *sg)
 	return sg->a_target;
 }
 
-static inline void tonegen_mute(struct tone_state *sg)
+static inline void tonegen_trigger(struct comp_dev *dev, int cmd)
 {
-	sg->mute = 1;
-}
+	struct comp_data *cd = comp_get_drvdata(dev);
 
-static inline void tonegen_unmute(struct tone_state *sg)
-{
-	sg->mute = 0;
+	if (cmd == 0)
+		switch (cd->trigger) {
+		/* Ignore the driver requests to restore previously stored
+		 * kcontrol state at boot up and keep tone enabled by default
+		 */
+		case -2:
+			cd->trigger = -1;
+			break;
+		case -1:
+			cd->trigger = 1;
+			break;
+		default:
+			cd->trigger = cmd;
+			break;
+		}
+	else
+		cd->trigger = cmd;
 }
 
 static void tonegen_update_f(struct tone_state *sg, int32_t f)
@@ -332,7 +342,6 @@ static void tonegen_update_f(struct tone_state *sg, int32_t f)
 
 static void tonegen_reset(struct tone_state *sg)
 {
-	sg->mute = 1;
 	sg->a = 0;
 	sg->a_target = TONE_AMPLITUDE_DEFAULT;
 	sg->c = 0;
@@ -363,7 +372,6 @@ static int tonegen_init(struct tone_state *sg, int32_t fs, int32_t f, int32_t a)
 	sg->a = (sg->ramp_step > sg->a_target) ? sg->a_target : sg->ramp_step;
 
 	idx = -1;
-	sg->mute = 1;
 	sg->fs = 0;
 
 	/* Find index of current sample rate and then get from lookup table the
@@ -381,7 +389,6 @@ static int tonegen_init(struct tone_state *sg, int32_t fs, int32_t f, int32_t a)
 
 	sg->fs = fs;
 	sg->c = tone_pi2_div_fs[idx]; /* Store 2*pi/Fs */
-	sg->mute = 0;
 	tonegen_update_f(sg, f);
 
 	/* 125us as Q1.31 is 268435, calculate fs * 125e-6 in Q31.0  */
@@ -421,6 +428,8 @@ static struct comp_dev *tone_new(struct sof_ipc_comp *comp)
 
 	comp_set_drvdata(dev, cd);
 	cd->tone_func = tone_s32_default;
+	/* used to notify driver that tone is not active */
+	cd->trigger = -2;
 
 	/* Reset tone generator and set channels volumes to default */
 	for (i = 0; i < PLATFORM_MAX_CHANNELS; i++)
@@ -444,20 +453,28 @@ static void tone_free(struct comp_dev *dev)
 static int tone_params(struct comp_dev *dev)
 {
 	struct comp_data *cd = comp_get_drvdata(dev);
-	struct sof_ipc_comp_config *config = COMP_GET_CONFIG(dev);
+	struct sof_ipc_comp_config *sconfig;
 
 	trace_tone("par");
 
-	/* Need to compute this in non-host endpoint */
-	dev->frame_bytes =
-		dev->params.sample_container_bytes * dev->params.channels;
+	sconfig = COMP_GET_CONFIG(dev);
+	dev->params.frame_fmt = sconfig->frame_fmt;
+	/* Tone currently supports only SOF_IPC_FRAME_S32_LE format */
+	if (dev->params.frame_fmt != SOF_IPC_FRAME_S32_LE) {
+		trace_tone_error("etf");
+		return -EINVAL;
+	}
 
+	dev->params.direction = SOF_IPC_STREAM_PLAYBACK;
+	dev->params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
+	dev->params.rate = dev->frames * dev->pipeline->ipc_pipe.deadline;
+
+	/* TODO: set channels from topology */
+	dev->params.channels = 2;
+	/* Need to compute this in non-host endpoint */
+	dev->frame_bytes = comp_frame_bytes(dev);
 	/* calculate period size based on config */
 	cd->period_bytes = dev->frames * dev->frame_bytes;
-
-	/* EQ supports only S32_LE PCM format */
-	if (config->frame_fmt != SOF_IPC_FRAME_S32_LE)
-		return -EINVAL;
 
 	return 0;
 }
@@ -465,29 +482,35 @@ static int tone_params(struct comp_dev *dev)
 static int tone_cmd_set_value(struct comp_dev *dev, struct sof_ipc_ctrl_data *cdata)
 {
 	struct comp_data *cd = comp_get_drvdata(dev);
-	int j;
-	uint32_t ch;
-	bool val;
+	int current;
+
+	trace_tone("tpt");
 
 	if (cdata->cmd == SOF_CTRL_CMD_SWITCH) {
-		trace_tone("mst");
-		for (j = 0; j < cdata->num_elems; j++) {
-			ch = cdata->chanv[j].channel;
-			val = cdata->chanv[j].value;
-			tracev_value(ch);
-			tracev_value(val);
-			if (ch >= PLATFORM_MAX_CHANNELS) {
-				trace_tone_error("che");
-				return -EINVAL;
+		if (cdata->num_elems > 0) {
+			current = cd->trigger;
+			/* notify driver that switch state has not changed */
+			if (current == cdata->chanv[0].value) {
+				cdata->chanv[0].value = -1;
+				trace_value(cdata->chanv[0].value);
+				return 0;
 			}
-			if (val)
-				tonegen_unmute(&cd->sg[ch]);
-			else
-				tonegen_mute(&cd->sg[ch]);
 
+			/* set the switch state */
+			tonegen_trigger(dev, cdata->chanv[0].value);
+
+			/* notify driver of new switch state */
+			if (current == -2)
+				cdata->chanv[0].value = 1;
+			if (current == -1)
+				cdata->chanv[0].value = -1;
+			trace_value(cdata->chanv[0].value);
+		} else {
+			trace_tone_error("ete");
+			return -EINVAL;
 		}
 	} else {
-		trace_tone_error("ste");
+		trace_tone_error("etv");
 		return -EINVAL;
 	}
 
@@ -568,28 +591,33 @@ static int tone_cmd_set_data(struct comp_dev *dev,
 	return 0;
 }
 
-/* used to pass standard and bespoke commands (with data) to component */
-static int tone_cmd(struct comp_dev *dev, int cmd, void *data)
+static int tone_ctrl_get_cmd(struct comp_dev *dev,
+			     struct sof_ipc_ctrl_data *cdata)
 {
-	struct sof_ipc_ctrl_data *cdata = data;
-	int ret = 0;
+	struct comp_data *cd = comp_get_drvdata(dev);
+	int j;
 
-	trace_tone("cmd");
-
-	ret = comp_set_state(dev, cmd);
-	if (ret < 0)
-		return ret;
-
-	switch (cmd) {
-	case COMP_CMD_SET_DATA:
-		ret = tone_cmd_set_data(dev, cdata);
-		break;
-	case COMP_CMD_SET_VALUE:
-		ret = tone_cmd_set_value(dev, cdata);
-		break;
+	/* validate */
+	if (cdata->num_elems == 0 || cdata->num_elems >= SOF_IPC_MAX_CHANNELS) {
+		trace_tone_error("gc0");
+		tracev_value(cdata->num_elems);
+		return -EINVAL;
 	}
 
-	return ret;
+	if (cdata->cmd == SOF_CTRL_CMD_VOLUME || SOF_CTRL_CMD_SWITCH) {
+		trace_tone("tgt");
+		for (j = 0; j < cdata->num_elems; j++) {
+			cdata->chanv[j].channel = j;
+			cdata->chanv[j].value = cd->trigger;
+			tracev_value(cdata->chanv[j].channel);
+			tracev_value(cdata->chanv[j].value);
+		}
+	} else {
+		trace_tone_error("ec2");
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 /* copy and process stream data from source to sink buffers */
@@ -598,7 +626,7 @@ static int tone_copy(struct comp_dev * dev)
 	struct comp_buffer *sink;
 	struct comp_data *cd = comp_get_drvdata(dev);
 
-	trace_comp("cpy");
+	tracev_tone("cpy");
 
 	/* tone component sink buffer */
 	sink = list_first_item(&dev->bsink_list, struct comp_buffer,
@@ -623,6 +651,35 @@ static int tone_copy(struct comp_dev * dev)
 	}
 }
 
+/* used to pass standard and bespoke commands (with data) to component */
+static int tone_cmd(struct comp_dev *dev, int cmd, void *data)
+{
+	struct sof_ipc_ctrl_data *cdata = data;
+	int ret = 0;
+
+	trace_tone("cmd");
+
+	ret = comp_set_state(dev, cmd);
+	if (ret < 0)
+		return ret;
+
+	switch (cmd) {
+	case COMP_CMD_SET_DATA:
+		ret = tone_cmd_set_data(dev, cdata);
+		break;
+	case COMP_CMD_SET_VALUE:
+		ret = tone_cmd_set_value(dev, cdata);
+		break;
+	case COMP_CMD_GET_VALUE:
+		ret = tone_ctrl_get_cmd(dev, cdata);
+		break;
+	default:
+		return ret;
+	}
+
+	return ret;
+}
+
 static int tone_prepare(struct comp_dev * dev)
 {
 	struct comp_data *cd = comp_get_drvdata(dev);
@@ -631,7 +688,7 @@ static int tone_prepare(struct comp_dev * dev)
 	int ret;
 	int i;
 
-	trace_tone("TPp");
+	trace_tone("pre");
 
 	ret = comp_set_state(dev, COMP_CMD_PREPARE);
 	if (ret < 0)

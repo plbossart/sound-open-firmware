@@ -53,7 +53,6 @@
 #define trace_dai_error(__e)   trace_error(TRACE_CLASS_DAI, __e)
 #define tracev_dai(__e)        tracev_event(TRACE_CLASS_DAI, __e)
 
-
 struct dai_data {
 	/* local DMA config */
 	int chan;
@@ -508,6 +507,7 @@ static void dai_pointer_init(struct comp_dev *dev)
 {
 	struct comp_buffer *dma_buffer;
 	struct dai_data *dd = comp_get_drvdata(dev);
+	struct comp_dev *sched_comp;
 
 	/* not required for capture streams */
 	if (dev->params.direction == SOF_IPC_STREAM_PLAYBACK) {
@@ -523,6 +523,13 @@ static void dai_pointer_init(struct comp_dev *dev)
 			/* advance source pipeline w_ptr by one period
 			 * this places pipeline w_ptr in period before DAI r_ptr */
 			comp_update_buffer_produce(dma_buffer, dd->period_bytes);
+			/* advance source pipeline w_ptr by one more period
+			 * in the case of hostless tone pipeline
+			 */
+			sched_comp = dev->pipeline->sched_comp;
+			if (sched_comp->comp.type == SOF_COMP_TONE)
+				comp_update_buffer_produce(dma_buffer,
+							   dd->period_bytes);
 			break;
 		}
 	}

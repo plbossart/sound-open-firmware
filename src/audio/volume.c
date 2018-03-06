@@ -402,16 +402,22 @@ static void volume_free(struct comp_dev *dev)
 }
 
 /*
- * Set volume component audio stream paramters - All done in prepare() since
- * wee need to know source and sink component params.
+ * Set volume component audio stream parameters - All done in prepare() since
+ * we need to know source and sink component params.
  */
 static int volume_params(struct comp_dev *dev)
 {
 	struct comp_data *cd = comp_get_drvdata(dev);
+	struct sof_ipc_comp_config *sconfig;
+	struct comp_buffer *sinkb;
 
 	trace_volume("par");
 
 	/* rewrite params format for all downstream */
+	sinkb = list_first_item(&dev->bsink_list, struct comp_buffer,
+				source_list);
+	sconfig = COMP_GET_CONFIG(sinkb->sink);
+	cd->sink_format = sconfig->frame_fmt;
 	dev->params.frame_fmt = cd->sink_format;
 
 	return 0;
@@ -629,6 +635,7 @@ static int volume_prepare(struct comp_dev *dev)
 	switch (sourceb->source->comp.type) {
 	case SOF_COMP_HOST:
 	case SOF_COMP_SG_HOST:
+	case SOF_COMP_TONE:
 		/* source format comes from IPC params */
 		cd->source_format = sourceb->source->params.frame_fmt;
 		cd->source_period_bytes = dev->frames *

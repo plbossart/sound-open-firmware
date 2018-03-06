@@ -254,36 +254,41 @@ static int ipc_stream_pcm_params(uint32_t stream)
 	cd->params = pcm_params->params;
 
 #ifdef CONFIG_HOST_PTABLE
-	/* use DMA to read in compressed page table ringbuffer from host */
-	err = get_page_descriptors(iipc, &pcm_params->params.buffer);
-	if (err < 0) {
-		trace_ipc_error("eAp");
-		goto error;
-	}
-
-	/* Parse host tables */
-	host = (struct sof_ipc_comp_host *)&cd->comp;
-	ring_size = pcm_params->params.buffer.size;
-	list_init(&elem_list);
-
-	err = parse_page_descriptors(iipc, &pcm_params->params.buffer,
-		&elem_list, host->direction);
-	if (err < 0) {
-		trace_ipc_error("eAP");
-		goto error;
-	}
-
-	list_for_item(plist, &elem_list) {
-		elem = container_of(plist, struct dma_sg_elem, list);
-
-		err = comp_host_buffer(cd, elem, ring_size);
+	/* No need to set up page tables for hostless pipeline */
+	if (cd->comp.type != SOF_COMP_TONE) {
+		/* use DMA to read in compressed page table ringbuffer
+		 * from host
+		 */
+		err = get_page_descriptors(iipc, &pcm_params->params.buffer);
 		if (err < 0) {
-			trace_ipc_error("ePb");
+			trace_ipc_error("eAp");
 			goto error;
 		}
 
-		list_item_del(&elem->list);
-		rfree(elem);
+		/* Parse host tables */
+		host = (struct sof_ipc_comp_host *)&cd->comp;
+		ring_size = pcm_params->params.buffer.size;
+		list_init(&elem_list);
+
+		err = parse_page_descriptors(iipc, &pcm_params->params.buffer,
+					     &elem_list, host->direction);
+		if (err < 0) {
+			trace_ipc_error("eAP");
+			goto error;
+		}
+
+		list_for_item(plist, &elem_list) {
+			elem = container_of(plist, struct dma_sg_elem, list);
+
+			err = comp_host_buffer(cd, elem, ring_size);
+			if (err < 0) {
+				trace_ipc_error("ePb");
+				goto error;
+			}
+
+			list_item_del(&elem->list);
+			rfree(elem);
+		}
 	}
 #endif
 

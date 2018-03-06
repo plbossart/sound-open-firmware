@@ -377,9 +377,14 @@ static int component_op_downstream(struct op_data *op_data,
 	case COMP_OPS_CMD:
 		/* send command to the component and update pipeline state  */
 		err = comp_cmd(current, op_data->cmd, op_data->cmd_data);
-		if (err == 0)
-			pipeline_cmd_update(current->pipeline, current,
-				op_data->cmd);
+		if (err == 0) {
+			/* do not schedule pipeline copy for hostless
+			 * tone pipeline
+			 */
+			if (current->comp.type != SOF_COMP_TONE)
+				pipeline_cmd_update(start->pipeline, current,
+						    op_data->cmd);
+		}
 		break;
 	case COMP_OPS_PREPARE:
 		/* prepare the component */
