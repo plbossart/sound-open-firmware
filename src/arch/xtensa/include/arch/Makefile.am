@@ -1,7 +1,7 @@
 noinst_HEADERS = \
 	cache.h \
 	interrupt.h \
-	reef.h \
+	sof.h \
 	spinlock.h \
 	task.h \
 	timer.h \
